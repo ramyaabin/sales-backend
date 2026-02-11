@@ -18,6 +18,7 @@ const SaleSchema = new mongoose.Schema(
     },
     salesmanName: {
       type: String,
+      required: true, // Made required to ensure data integrity
       trim: true,
     },
 
@@ -35,6 +36,7 @@ const SaleSchema = new mongoose.Schema(
     // Product Information
     brand: {
       type: String,
+      required: true, // Made required for data integrity
       trim: true,
       index: true, // ✅ Index for brand-based reports
     },
@@ -44,6 +46,7 @@ const SaleSchema = new mongoose.Schema(
     },
     itemCode: {
       type: String,
+      required: true, // Made required for data integrity
       trim: true,
       index: true, // ✅ Index for product lookups
     },
@@ -61,7 +64,6 @@ const SaleSchema = new mongoose.Schema(
     },
     totalAmount: {
       type: Number, // Total = quantity × price
-      required: true,
       min: 0,
     },
 
@@ -89,11 +91,14 @@ SaleSchema.index({ brand: 1, date: -1 });
 // Index for monthly reports
 SaleSchema.index({ date: -1 });
 
+// Compound index for item tracking
+SaleSchema.index({ itemCode: 1, date: -1 });
+
 // ==================== SCHEMA METHODS ====================
 
-// Calculate total amount before saving
+// Calculate total amount before saving (if not already set)
 SaleSchema.pre("save", function (next) {
-  if (this.quantity && this.price) {
+  if (this.quantity && this.price && !this.totalAmount) {
     this.totalAmount = this.quantity * this.price;
   }
   next();
@@ -158,6 +163,51 @@ SaleSchema.statics.getTotalSales = async function (
   return result[0] || { total: 0, count: 0 };
 };
 
+// Static method to get brand performance statistics
+SaleSchema.statics.getBrandStats = async function (startDate, endDate) {
+  const query = {};
+  if (startDate && endDate) {
+    query.date = { $gte: startDate, $lte: endDate };
+  }
+
+  return this.aggregate([
+    { $match: query },
+    {
+      $group: {
+        _id: "$brand",
+        totalSales: { $sum: "$totalAmount" },
+        totalQuantity: { $sum: "$quantity" },
+        transactionCount: { $sum: 1 },
+      },
+    },
+    { $sort: { totalSales: -1 } },
+  ]);
+};
+
+// Static method to get salesman performance
+SaleSchema.statics.getSalesmanPerformance = async function (
+  startDate,
+  endDate,
+) {
+  const query = {};
+  if (startDate && endDate) {
+    query.date = { $gte: startDate, $lte: endDate };
+  }
+
+  return this.aggregate([
+    { $match: query },
+    {
+      $group: {
+        _id: "$salesmanId",
+        salesmanName: { $first: "$salesmanName" },
+        totalSales: { $sum: "$totalAmount" },
+        totalTransactions: { $sum: 1 },
+      },
+    },
+    { $sort: { totalSales: -1 } },
+  ]);
+};
+
 // ==================== VIRTUAL PROPERTIES ====================
 
 // Virtual for formatted date
@@ -172,6 +222,14 @@ SaleSchema.virtual("formattedDate").get(function () {
 // Virtual for formatted amount in AED
 SaleSchema.virtual("formattedAmount").get(function () {
   return `AED ${this.totalAmount.toLocaleString("en-AE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+});
+
+// Virtual for formatted price
+SaleSchema.virtual("formattedPrice").get(function () {
+  return `AED ${this.price.toLocaleString("en-AE", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
@@ -193,6 +251,11 @@ SaleSchema.virtual("formattedAmount").get(function () {
  * - Indexes ensure fast queries even with millions of records
  * - Date-based indexes support efficient reporting
  * - Compound indexes optimize common query patterns
+ *
+ * DATA INTEGRITY:
+ * - Required fields: salesmanId, salesmanName, date, brand, itemCode, quantity, price
+ * - Auto-calculation of totalAmount if not provided
+ * - Timestamps track creation and modification
  */
 
 export default mongoose.model("Sale", SaleSchema);
