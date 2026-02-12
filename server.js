@@ -10,31 +10,29 @@ import Sale from "./models/Sale.js";
 import Leave from "./models/Leave.js";
 import uploadUsersRoute from "./routes/uploadUsers.js";
 
-/* ===================== ENV ===================== */
+/* ===================== ENV CONFIG ===================== */
 dotenv.config();
-console.log("MONGO_URI:", process.env.MONGO_URI);
 
-/* ===================== VALIDATION ===================== */
 if (!process.env.MONGO_URI) {
-  console.error("❌ ERROR: MONGO_URI is not set");
+  console.error("❌ ERROR: MONGO_URI is not set in environment variables");
   process.exit(1);
 }
 
-/* ===================== APP ===================== */
+/* ===================== APP INIT ===================== */
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 /* ===================== CORS ===================== */
 app.use(
   cors({
-    origin: true,
+    origin: ["http://localhost:5173", "https://salesapp-c1xw.onrender.com"],
     credentials: true,
   }),
 );
 
 app.use(express.json());
 
-/* ===================== LOGGING ===================== */
+/* ===================== REQUEST LOG ===================== */
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
@@ -43,13 +41,12 @@ app.use((req, res, next) => {
 /* ===================== ROUTES ===================== */
 app.use("/api", uploadUsersRoute);
 
-/* ===================== HEALTH ===================== */
+/* ===================== HEALTH CHECK ===================== */
 app.get("/", (req, res) => {
   res.json({
     status: "running",
-    environment: process.env.NODE_ENV || "development",
     mongodb:
-      mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+      mongoose.connection.readyState === 1 ? "connected ✅" : "disconnected ❌",
     timestamp: new Date().toISOString(),
   });
 });
@@ -65,38 +62,24 @@ app.get("/api/test", (req, res) => {
 /* ===================== START SERVER ===================== */
 async function startServer() {
   try {
-    /* ---------- CONNECT DB ---------- */
-    await mongoose.connect(process.env.MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-
+    await mongoose.connect(process.env.MONGO_URI);
     console.log("✅ MongoDB connected");
 
     /* ===================== CREATE DEFAULT ADMIN ===================== */
-    const createDefaultAdmin = async () => {
-      try {
-        const exists = await User.findOne({ username: "gokul" });
+    const exists = await User.findOne({ username: "gokul" });
 
-        if (!exists) {
-          await User.create({
-            username: "gokul",
-            password: "admin123",
-            name: "Gokul",
-            role: "admin",
-            email: "admin@gmail.com",
-          });
-
-          console.log("✅ Default admin created");
-        } else {
-          console.log("ℹ️ Default admin already exists");
-        }
-      } catch (err) {
-        console.error("❌ Admin creation failed:", err);
-      }
-    };
-
-    await createDefaultAdmin();
+    if (!exists) {
+      await User.create({
+        username: "gokul",
+        password: "admin123",
+        name: "Gokul",
+        role: "admin",
+        email: "admin@gmail.com",
+      });
+      console.log("✅ Default admin created");
+    } else {
+      console.log("ℹ️ Default admin already exists");
+    }
 
     /* ===================== USERS ===================== */
     app.get("/api/users", async (req, res) => {
@@ -104,7 +87,6 @@ async function startServer() {
         const users = await User.find().select("-__v");
         res.json(users);
       } catch (err) {
-        console.error("Error fetching users:", err);
         res.status(500).json({ error: "Failed to fetch users" });
       }
     });
@@ -122,7 +104,7 @@ async function startServer() {
           return res.status(400).json({ error: "Username exists" });
         }
 
-        const user = new User({
+        const user = await User.create({
           username,
           password,
           name,
@@ -130,10 +112,8 @@ async function startServer() {
           salesmanId: role === "salesman" ? salesmanId : undefined,
         });
 
-        await user.save();
         res.status(201).json({ success: true, user });
       } catch (err) {
-        console.error("Error adding user:", err);
         res.status(500).json({ error: "Failed to add user" });
       }
     });
@@ -142,18 +122,12 @@ async function startServer() {
       try {
         const { salesmanId } = req.params;
 
-        const user = await User.findOne({ salesmanId });
-        if (!user || user.role !== "salesman") {
-          return res.status(404).json({ error: "Salesman not found" });
-        }
-
         await User.deleteOne({ salesmanId });
         await Sale.deleteMany({ salesmanId });
         await Leave.deleteMany({ salesmanId });
 
         res.json({ success: true });
       } catch (err) {
-        console.error("Error deleting user:", err);
         res.status(500).json({ error: "Failed to delete user" });
       }
     });
@@ -179,7 +153,6 @@ async function startServer() {
 
         res.json({ success: true });
       } catch (err) {
-        console.error("Error resetting password:", err);
         res.status(500).json({ error: "Failed to reset password" });
       }
     });
@@ -196,7 +169,6 @@ async function startServer() {
 
         res.json({ success: true, user });
       } catch (err) {
-        console.error("Error during login:", err);
         res.status(500).json({ error: "Login failed" });
       }
     });
@@ -205,22 +177,17 @@ async function startServer() {
     app.get("/api/products", async (req, res) => {
       try {
         const products = await Product.find();
-        console.log(`✅ Products fetched: ${products.length} items`);
         res.json(products);
       } catch (err) {
-        console.error("Error fetching products:", err);
         res.status(500).json({ error: "Failed to fetch products" });
       }
     });
 
     app.post("/api/products", async (req, res) => {
       try {
-        const product = new Product(req.body);
-        await product.save();
-        console.log("✅ Product added:", product);
+        const product = await Product.create(req.body);
         res.status(201).json({ success: true, product });
       } catch (err) {
-        console.error("Error adding product:", err);
         res.status(500).json({ error: "Failed to add product" });
       }
     });
@@ -236,22 +203,17 @@ async function startServer() {
         if (month) query.date = { $regex: `^${month}` };
 
         const sales = await Sale.find(query).sort({ date: -1 });
-        console.log(`✅ Sales fetched: ${sales.length} records`);
         res.json(sales);
       } catch (err) {
-        console.error("Error fetching sales:", err);
         res.status(500).json({ error: "Failed to fetch sales" });
       }
     });
 
     app.post("/api/sales", async (req, res) => {
       try {
-        const sale = new Sale(req.body);
-        await sale.save();
-        console.log("✅ Sale added:", sale);
+        const sale = await Sale.create(req.body);
         res.json({ success: true, sale });
       } catch (err) {
-        console.error("Error adding sale:", err);
         res.status(500).json({ error: "Failed to add sale" });
       }
     });
@@ -261,7 +223,6 @@ async function startServer() {
         await Sale.findByIdAndDelete(req.params.id);
         res.json({ success: true });
       } catch (err) {
-        console.error("Error deleting sale:", err);
         res.status(500).json({ error: "Failed to delete sale" });
       }
     });
@@ -276,10 +237,8 @@ async function startServer() {
         if (date) query.date = date;
 
         const leaves = await Leave.find(query).sort({ date: -1 });
-        console.log(`✅ Leaves fetched: ${leaves.length} records`);
         res.json(leaves);
       } catch (err) {
-        console.error("Error fetching leaves:", err);
         res.status(500).json({ error: "Failed to fetch leaves" });
       }
     });
@@ -292,17 +251,14 @@ async function startServer() {
         });
 
         if (exists) {
-          return res.status(400).json({ error: "Leave already applied for this date" });
+          return res
+            .status(400)
+            .json({ error: "Leave already applied for this date" });
         }
 
-        const leave = new Leave(req.body);
-        await leave.save();
-        console.log("✅ Leave added:", leave);
-        
-        // CRITICAL FIX: Return the leave object so frontend can save it
+        const leave = await Leave.create(req.body);
         res.json({ success: true, leave });
       } catch (err) {
-        console.error("Error adding leave:", err);
         res.status(500).json({ error: "Failed to add leave" });
       }
     });
@@ -312,7 +268,6 @@ async function startServer() {
         await Leave.findByIdAndDelete(req.params.id);
         res.json({ success: true });
       } catch (err) {
-        console.error("Error deleting leave:", err);
         res.status(500).json({ error: "Failed to delete leave" });
       }
     });
@@ -321,12 +276,15 @@ async function startServer() {
     app.get("/api/stats", async (req, res) => {
       try {
         const sales = await Sale.find();
+
         const totalAmount = sales.reduce(
           (sum, s) => sum + (s.totalAmount || s.quantity * s.price),
           0,
         );
 
-        const totalSalesmen = await User.countDocuments({ role: "salesman" });
+        const totalSalesmen = await User.countDocuments({
+          role: "salesman",
+        });
 
         res.json({
           totalAmount,
@@ -334,7 +292,6 @@ async function startServer() {
           totalSalesmen,
         });
       } catch (err) {
-        console.error("Error fetching stats:", err);
         res.status(500).json({ error: "Failed to fetch stats" });
       }
     });
