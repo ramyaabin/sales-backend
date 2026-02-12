@@ -59,13 +59,20 @@ app.get("/api/test", (req, res) => {
   });
 });
 
-/* ===================== START SERVER ===================== */
-async function startServer() {
-  try {
-    await mongoose.connect(process.env.MONGO_URI);
+/* ===================== START SERVER FIRST ===================== */
+app.listen(PORT, () => {
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+});
+
+/* ===================== CONNECT TO MONGODB ===================== */
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(async () => {
     console.log("✅ MongoDB connected");
 
-    /* ===================== CREATE DEFAULT ADMIN ===================== */
+    // Create default admin if not exists
     const exists = await User.findOne({ username: "gokul" });
 
     if (!exists) {
@@ -80,6 +87,10 @@ async function startServer() {
     } else {
       console.log("ℹ️ Default admin already exists");
     }
+  })
+  .catch((err) => {
+    console.error("❌ MongoDB connection failed:", err.message);
+  });
 
     /* ===================== USERS ===================== */
     app.get("/api/users", async (req, res) => {
