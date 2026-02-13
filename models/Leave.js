@@ -27,10 +27,7 @@ const LeaveSchema = new mongoose.Schema(
     timestamp: { type: String, default: () => new Date().toISOString() },
     updatedAt: { type: Date, default: Date.now },
   },
-  {
-    timestamps: true,
-    collection: "leaves",
-  },
+  { timestamps: true, collection: "leaves" },
 );
 
 LeaveSchema.index({ salesmanId: 1, fromDate: 1 }, { unique: true });
@@ -39,7 +36,7 @@ LeaveSchema.index({ status: 1, salesmanId: 1 });
 LeaveSchema.index({ date: -1 });
 
 LeaveSchema.pre("save", function (next) {
-  this.date = this.fromDate; // backward compatibility
+  this.date = this.fromDate;
   if (this.status === "approved" && !this.approvedAt)
     this.approvedAt = new Date();
   next();
@@ -67,12 +64,39 @@ LeaveSchema.methods.getDuration = function () {
   return Math.ceil((to - from) / (1000 * 60 * 60 * 24)) + 1;
 };
 
+// ==================== STATIC METHODS FOR DASHBOARD ====================
 LeaveSchema.statics.getLeavesOnDate = function (date) {
   return this.find({
     fromDate: { $lte: date },
     toDate: { $gte: date },
     status: "approved",
   });
+};
+
+LeaveSchema.statics.getLeavesByDateRange = function (startDate, endDate) {
+  return this.find({
+    $or: [
+      { fromDate: { $gte: startDate, $lte: endDate } },
+      { toDate: { $gte: startDate, $lte: endDate } },
+      { fromDate: { $lte: startDate }, toDate: { $gte: endDate } },
+    ],
+  }).sort({ fromDate: -1 });
+};
+
+LeaveSchema.statics.getSalesmanLeaveBalance = async function (
+  salesmanId,
+  year,
+) {
+  const leaves = await this.find({
+    salesmanId,
+    status: "approved",
+    fromDate: { $regex: `^${year}` },
+  });
+  let totalDays = 0;
+  leaves.forEach((l) => {
+    totalDays += l.getDuration();
+  });
+  return totalDays;
 };
 
 LeaveSchema.statics.getSalesmenOnLeaveToday = function () {

@@ -1,72 +1,22 @@
+// models/Sale.js
 import mongoose from "mongoose";
 
 /**
- * Sale Schema - Permanent Sales Record Storage
- *
- * Stores all sales records permanently in MongoDB.
- * Designed for long-term reporting, analytics, and auditing.
+ * Sale Schema - Permanent Sales Record
+ * Supports dashboard analytics, total calculations, and Excel uploads
  */
 const SaleSchema = new mongoose.Schema(
   {
-    // Salesman Information
-    salesmanId: {
-      type: String,
-      required: true,
-      trim: true,
-      index: true, // fast queries by salesman
-    },
-    salesmanName: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    // Sale Date
-    date: {
-      type: String, // format: YYYY-MM-DD
-      required: true,
-      index: true,
-    },
-    timestamp: {
-      type: String,
-      default: () => new Date().toISOString(),
-    },
-
-    // Product Information
-    brand: {
-      type: String,
-      required: true,
-      trim: true,
-      index: true,
-    },
-    modelNumber: {
-      type: String,
-      trim: true,
-    },
-    itemCode: {
-      type: String,
-      required: true,
-      trim: true,
-      index: true,
-    },
-
-    // Sale Details
-    quantity: {
-      type: Number,
-      required: true,
-      min: 1,
-    },
-    price: {
-      type: Number,
-      required: true,
-      min: 0,
-    },
-    totalAmount: {
-      type: Number,
-      min: 0,
-    },
-
-    // Metadata
+    salesmanId: { type: String, required: true, index: true, trim: true },
+    salesmanName: { type: String, required: true, trim: true },
+    date: { type: String, required: true, index: true },
+    timestamp: { type: String, default: () => new Date().toISOString() },
+    brand: { type: String, required: true, trim: true, index: true },
+    modelNumber: { type: String, trim: true },
+    itemCode: { type: String, required: true, trim: true, index: true },
+    quantity: { type: Number, required: true, min: 1 },
+    price: { type: Number, required: true, min: 0 },
+    totalAmount: { type: Number, min: 0 },
     createdAt: Date,
     updatedAt: Date,
   },
@@ -76,8 +26,13 @@ const SaleSchema = new mongoose.Schema(
   },
 );
 
+// ==================== INDEXES ====================
+SaleSchema.index({ salesmanId: 1, date: -1 });
+SaleSchema.index({ date: -1, salesmanId: 1 });
+SaleSchema.index({ brand: 1, date: -1 });
+SaleSchema.index({ itemCode: 1, date: -1 });
+
 // ==================== PRE-SAVE HOOK ====================
-// Calculate totalAmount if not already set
 SaleSchema.pre("save", function (next) {
   if (this.quantity && this.price && !this.totalAmount) {
     this.totalAmount = this.quantity * this.price;
@@ -85,15 +40,9 @@ SaleSchema.pre("save", function (next) {
   next();
 });
 
-// ==================== INDEXES ====================
-SaleSchema.index({ salesmanId: 1, date: -1 });
-SaleSchema.index({ date: -1, salesmanId: 1 });
-SaleSchema.index({ brand: 1, date: -1 });
-SaleSchema.index({ itemCode: 1, date: -1 });
+// ==================== STATIC METHODS FOR DASHBOARD ====================
 
-// ==================== STATIC METHODS ====================
-
-// Get sales by salesman and optional date range
+// Get sales by date range
 SaleSchema.statics.getSalesByDateRange = function (
   salesmanId,
   startDate,
@@ -106,7 +55,7 @@ SaleSchema.statics.getSalesByDateRange = function (
   return this.find(query).sort({ date: -1 });
 };
 
-// Get monthly sales for a salesman (YYYY-MM)
+// Get monthly sales
 SaleSchema.statics.getMonthlySales = function (salesmanId, yearMonth) {
   return this.find({
     salesmanId,
@@ -114,14 +63,7 @@ SaleSchema.statics.getMonthlySales = function (salesmanId, yearMonth) {
   }).sort({ date: -1 });
 };
 
-// Get sales by brand
-SaleSchema.statics.getSalesByBrand = function (brand, startDate, endDate) {
-  const query = { brand };
-  if (startDate && endDate) query.date = { $gte: startDate, $lte: endDate };
-  return this.find(query).sort({ date: -1 });
-};
-
-// Get total sales amount for a salesman
+// Get total sales amount
 SaleSchema.statics.getTotalSales = async function (
   salesmanId,
   startDate,
@@ -129,7 +71,6 @@ SaleSchema.statics.getTotalSales = async function (
 ) {
   const query = { salesmanId };
   if (startDate && endDate) query.date = { $gte: startDate, $lte: endDate };
-
   const result = await this.aggregate([
     { $match: query },
     {
@@ -140,13 +81,49 @@ SaleSchema.statics.getTotalSales = async function (
       },
     },
   ]);
-
   return result[0] || { total: 0, count: 0 };
 };
 
-// ==================== VIRTUAL PROPERTIES ====================
+// Get brand performance
+SaleSchema.statics.getBrandStats = async function (startDate, endDate) {
+  const query = {};
+  if (startDate && endDate) query.date = { $gte: startDate, $lte: endDate };
+  return this.aggregate([
+    { $match: query },
+    {
+      $group: {
+        _id: "$brand",
+        totalSales: { $sum: "$totalAmount" },
+        totalQuantity: { $sum: "$quantity" },
+        transactionCount: { $sum: 1 },
+      },
+    },
+    { $sort: { totalSales: -1 } },
+  ]);
+};
 
-// Formatted date
+// Get salesman performance
+SaleSchema.statics.getSalesmanPerformance = async function (
+  startDate,
+  endDate,
+) {
+  const query = {};
+  if (startDate && endDate) query.date = { $gte: startDate, $lte: endDate };
+  return this.aggregate([
+    { $match: query },
+    {
+      $group: {
+        _id: "$salesmanId",
+        salesmanName: { $first: "$salesmanName" },
+        totalSales: { $sum: "$totalAmount" },
+        totalTransactions: { $sum: 1 },
+      },
+    },
+    { $sort: { totalSales: -1 } },
+  ]);
+};
+
+// ==================== VIRTUALS ====================
 SaleSchema.virtual("formattedDate").get(function () {
   return new Date(this.date).toLocaleDateString("en-AE", {
     day: "2-digit",
@@ -155,20 +132,12 @@ SaleSchema.virtual("formattedDate").get(function () {
   });
 });
 
-// Formatted total amount
 SaleSchema.virtual("formattedAmount").get(function () {
-  return `AED ${this.totalAmount.toLocaleString("en-AE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return `AED ${this.totalAmount?.toLocaleString("en-AE", { minimumFractionDigits: 2 })}`;
 });
 
-// Formatted price per unit
 SaleSchema.virtual("formattedPrice").get(function () {
-  return `AED ${this.price.toLocaleString("en-AE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return `AED ${this.price?.toLocaleString("en-AE", { minimumFractionDigits: 2 })}`;
 });
 
 export default mongoose.model("Sale", SaleSchema);
