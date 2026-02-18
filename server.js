@@ -64,7 +64,8 @@ app.get("/api/users", async (req, res) => {
   try {
     const users = await User.find().select("-__v");
     res.json(users);
-  } catch {
+  } catch (err) {
+    console.error("❌ Error fetching users:", err.message);
     res.status(500).json({ error: "Failed to fetch users" });
   }
 });
@@ -90,7 +91,8 @@ app.post("/api/users", async (req, res) => {
     });
 
     res.status(201).json({ success: true, user });
-  } catch {
+  } catch (err) {
+    console.error("❌ Error adding user:", err.message);
     res.status(500).json({ error: "Failed to add user" });
   }
 });
@@ -102,7 +104,8 @@ app.delete("/api/users/:salesmanId", async (req, res) => {
     await Sale.deleteMany({ salesmanId });
     await Leave.deleteMany({ salesmanId });
     res.json({ success: true });
-  } catch {
+  } catch (err) {
+    console.error("❌ Error deleting user:", err.message);
     res.status(500).json({ error: "Failed to delete user" });
   }
 });
@@ -118,7 +121,8 @@ app.post("/api/login", async (req, res) => {
     }
 
     res.json({ success: true, user });
-  } catch {
+  } catch (err) {
+    console.error("❌ Error during login:", err.message);
     res.status(500).json({ error: "Login failed" });
   }
 });
@@ -127,7 +131,8 @@ app.post("/api/login", async (req, res) => {
 app.get("/api/products", async (req, res) => {
   try {
     res.json(await Product.find());
-  } catch {
+  } catch (err) {
+    console.error("❌ Error fetching products:", err.message);
     res.status(500).json({ error: "Failed to fetch products" });
   }
 });
@@ -136,7 +141,8 @@ app.post("/api/products", async (req, res) => {
   try {
     const product = await Product.create(req.body);
     res.status(201).json({ success: true, product });
-  } catch {
+  } catch (err) {
+    console.error("❌ Error adding product:", err.message);
     res.status(500).json({ error: "Failed to add product" });
   }
 });
@@ -151,16 +157,21 @@ app.get("/api/sales", async (req, res) => {
     if (month) query.date = { $regex: `^${month}` };
 
     res.json(await Sale.find(query).sort({ date: -1 }));
-  } catch {
+  } catch (err) {
+    console.error("❌ Error fetching sales:", err.message);
     res.status(500).json({ error: "Failed to fetch sales" });
   }
 });
 
 app.post("/api/sales", async (req, res) => {
   try {
+    console.log("📥 Received sale data:", req.body);
     const sale = await Sale.create(req.body);
+    console.log("✅ Sale created successfully:", sale._id);
     res.json({ success: true, sale });
-  } catch {
+  } catch (err) {
+    console.error("❌ Error adding sale:", err.message);
+    console.error("Full error details:", err);
     res.status(500).json({ error: "Failed to add sale" });
   }
 });
@@ -174,13 +185,16 @@ app.get("/api/leaves", async (req, res) => {
     if (date) query.date = date;
 
     res.json(await Leave.find(query).sort({ date: -1 }));
-  } catch {
+  } catch (err) {
+    console.error("❌ Error fetching leaves:", err.message);
     res.status(500).json({ error: "Failed to fetch leaves" });
   }
 });
 
 app.post("/api/leaves", async (req, res) => {
   try {
+    console.log("📥 Received leave data:", req.body);
+
     if (
       await Leave.findOne({
         salesmanId: req.body.salesmanId,
@@ -191,8 +205,11 @@ app.post("/api/leaves", async (req, res) => {
     }
 
     const leave = await Leave.create(req.body);
+    console.log("✅ Leave created successfully:", leave._id);
     res.json({ success: true, leave });
-  } catch {
+  } catch (err) {
+    console.error("❌ Error adding leave:", err.message);
+    console.error("Full error details:", err);
     res.status(500).json({ error: "Failed to add leave" });
   }
 });
@@ -212,7 +229,8 @@ app.get("/api/stats", async (req, res) => {
       totalTransactions: sales.length,
       totalSalesmen,
     });
-  } catch {
+  } catch (err) {
+    console.error("❌ Error fetching stats:", err.message);
     res.status(500).json({ error: "Failed to fetch stats" });
   }
 });
