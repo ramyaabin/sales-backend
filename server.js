@@ -9,6 +9,7 @@ import User from "./models/User.js";
 import Sale from "./models/Sale.js";
 import Leave from "./models/Leave.js";
 import uploadUsersRoute from "./routes/uploadUsers.js";
+import excelUploadRoute from "./routes/excelUploadRoute.js"; // ✅ ADDED
 
 /* ===================== ENV ===================== */
 dotenv.config();
@@ -40,6 +41,7 @@ app.use((req, res, next) => {
 
 /* ===================== ROUTES ===================== */
 app.use("/api", uploadUsersRoute);
+app.use("/api", excelUploadRoute); // ✅ ADDED — enables POST /api/upload-excel
 
 /* ===================== HEALTH ===================== */
 app.get("/", (req, res) => {
@@ -95,6 +97,32 @@ app.post("/api/users", async (req, res) => {
   }
 });
 
+// ✅ ADDED — Password reset endpoint (called from api.js resetPassword())
+app.put("/api/users/:salesmanId/password", async (req, res) => {
+  try {
+    const { salesmanId } = req.params;
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({ error: "Password is required" });
+    }
+
+    const user = await User.findOneAndUpdate(
+      { salesmanId },
+      { password },
+      { new: true },
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ success: true, user });
+  } catch {
+    res.status(500).json({ error: "Failed to reset password" });
+  }
+});
+
 app.delete("/api/users/:salesmanId", async (req, res) => {
   try {
     const { salesmanId } = req.params;
@@ -126,7 +154,25 @@ app.post("/api/login", async (req, res) => {
 /* ===================== PRODUCTS ===================== */
 app.get("/api/products", async (req, res) => {
   try {
-    res.json(await Product.find());
+    const { search, brand, category } = req.query;
+
+    let query = { isActive: { $ne: false } };
+
+    // ✅ ADDED — search filter for product list in admin dashboard
+    if (search) {
+      const regex = new RegExp(search, "i");
+      query.$or = [
+        { brand: regex },
+        { description: regex },
+        { itemCode: regex },
+        { modelNumber: regex },
+      ];
+    }
+
+    if (brand) query.brand = new RegExp(brand, "i");
+    if (category) query.category = category;
+
+    res.json(await Product.find(query).sort({ brand: 1 }));
   } catch {
     res.status(500).json({ error: "Failed to fetch products" });
   }
@@ -159,19 +205,31 @@ app.get("/api/sales", async (req, res) => {
 app.post("/api/sales", async (req, res) => {
   try {
     const sale = await Sale.create(req.body);
-    res.json({ success: true, sale });
+    // ✅ Return consistent shape — sale is always in result.sale
+    res.status(201).json({ success: true, sale });
   } catch {
     res.status(500).json({ error: "Failed to add sale" });
+  }
+});
+
+// ✅ ADDED — Delete a sale
+app.delete("/api/sales/:id", async (req, res) => {
+  try {
+    await Sale.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: "Failed to delete sale" });
   }
 });
 
 /* ===================== LEAVES ===================== */
 app.get("/api/leaves", async (req, res) => {
   try {
-    const { salesmanId, date } = req.query;
+    const { salesmanId, date, month } = req.query;
     let query = {};
     if (salesmanId) query.salesmanId = salesmanId;
     if (date) query.date = date;
+    if (month) query.date = { $regex: `^${month}` }; // ✅ ADDED month filter
 
     res.json(await Leave.find(query).sort({ date: -1 }));
   } catch {
@@ -191,9 +249,38 @@ app.post("/api/leaves", async (req, res) => {
     }
 
     const leave = await Leave.create(req.body);
-    res.json({ success: true, leave });
+    res.status(201).json({ success: true, leave });
   } catch {
     res.status(500).json({ error: "Failed to add leave" });
+  }
+});
+
+// ✅ ADDED — Approve / Reject leave (used by admin dashboard)
+app.patch("/api/leaves/:id", async (req, res) => {
+  try {
+    const updated = await Leave.findByIdAndUpdate(
+      req.params.id,
+      { status: req.body.status },
+      { new: true },
+    );
+
+    if (!updated) {
+      return res.status(404).json({ error: "Leave not found" });
+    }
+
+    res.json({ success: true, leave: updated });
+  } catch {
+    res.status(500).json({ error: "Failed to update leave status" });
+  }
+});
+
+// ✅ ADDED — Delete a leave
+app.delete("/api/leaves/:id", async (req, res) => {
+  try {
+    await Leave.findByIdAndDelete(req.params.id);
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: "Failed to delete leave" });
   }
 });
 
