@@ -156,24 +156,54 @@ app.get("/api/products", async (req, res) => {
   try {
     const { search, brand, category } = req.query;
 
-    let query = { isActive: { $ne: false } };
+    // Build query — don't filter by isActive so legacy data without it still appears
+    let query = {};
 
-    // ✅ ADDED — search filter for product list in admin dashboard
     if (search) {
       const regex = new RegExp(search, "i");
       query.$or = [
         { brand: regex },
+        { Brand: regex },
         { description: regex },
         { itemCode: regex },
+        { "Item Code": regex },
         { modelNumber: regex },
       ];
     }
 
-    if (brand) query.brand = new RegExp(brand, "i");
+    if (brand)
+      query.$or = [
+        { brand: new RegExp(brand, "i") },
+        { Brand: new RegExp(brand, "i") },
+      ];
     if (category) query.category = category;
 
-    res.json(await Product.find(query).sort({ brand: 1 }));
-  } catch {
+    const raw = await Product.find(query).sort({ brand: 1 }).lean();
+
+    // ✅ Normalize every product so the frontend always gets consistent fields
+    // regardless of how/when data was originally uploaded
+    const products = raw.map((p) => ({
+      ...p,
+      // itemCode — always a string so .toLowerCase() never crashes
+      itemCode: String(
+        p.itemCode || p["Item Code"] || p.itemcode || p.ItemCode || "",
+      ),
+      // brand — prefer lowercase field, fall back to capitalized
+      brand: p.brand || p.Brand || "",
+      // price — frontend reads p.price; map from rspVat if price missing
+      price: p.price ?? p.rspVat ?? p[" RSP+Vat "] ?? p["RSP+Vat"] ?? 0,
+      // description
+      description:
+        p.description || p.Description || p["Item Description"] || "",
+      // modelNumber
+      modelNumber: String(
+        p.modelNumber || p["Model "] || p.Model || p.modelNo || "",
+      ).trim(),
+    }));
+
+    res.json(products);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "Failed to fetch products" });
   }
 });

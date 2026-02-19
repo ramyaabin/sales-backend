@@ -45,6 +45,13 @@ router.post("/upload-excel", upload.single("file"), async (req, res) => {
             row["RSP + VAT"] ||
             0,
         ),
+        price: Number(
+          row[" RSP+Vat "] ||
+            row["RSP+Vat"] ||
+            row.rspVat ||
+            row["RSP + VAT"] ||
+            0,
+        ), // ✅ alias so frontend p.price always works
 
         // Optional fields
         department: row.Department || row.department || "",
