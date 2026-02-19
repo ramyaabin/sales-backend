@@ -406,6 +406,17 @@ mongoose
   .then(async () => {
     console.log("✅ MongoDB connected");
 
+    // ✅ Drop stale index from old schema that used fromDate instead of date.
+    // This index causes E11000 duplicate key errors on every leave insert.
+    try {
+      await Leave.collection.dropIndex("salesmanId_1_fromDate_1");
+      console.log("✅ Dropped stale leaves index: salesmanId_1_fromDate_1");
+    } catch (e) {
+      // Index may not exist on fresh deployments — that is fine
+      if (e.code !== 27)
+        console.warn("⚠️ Could not drop stale index:", e.message);
+    }
+
     if (!(await User.findOne({ username: "gokul" }))) {
       await User.create({
         username: "gokul",
