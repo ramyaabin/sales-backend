@@ -26,7 +26,11 @@ const PORT = process.env.PORT || 5000;
 /* ===================== CORS ===================== */
 app.use(
   cors({
-    origin: ["http://localhost:5173", "https://salesapp-c1xw.onrender.com"],
+    origin: [
+      "http://localhost:5173",
+      "https://salesapp-c1xw.onrender.com",
+      "https://salesapp-yqxl.onrender.com",
+    ],
     credentials: true,
   }),
 );
