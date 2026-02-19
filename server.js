@@ -4,6 +4,8 @@ import mongoose from "mongoose";
 import cors from "cors";
 import dotenv from "dotenv";
 
+import nodemailer from "nodemailer";
+import crypto from "crypto";
 import Product from "./models/Product.js";
 import User from "./models/User.js";
 import Sale from "./models/Sale.js";
@@ -37,6 +39,19 @@ app.use(
 
 app.use(express.json());
 
+/* ===================== OTP STORE ===================== */
+// In-memory store: { username: { otp, expiry } }
+const otpStore = new Map();
+
+const createTransporter = () =>
+  nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.GMAIL_USER,
+      pass: process.env.GMAIL_APP_PASSWORD,
+    },
+  });
+
 /* ===================== REQUEST LOG ===================== */
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
@@ -63,6 +78,148 @@ app.get("/api/test", (req, res) => {
     mongodb:
       mongoose.connection.readyState === 1 ? "connected ✅" : "disconnected ❌",
   });
+});
+
+/* ===================== FORGOT PASSWORD (OTP) ===================== */
+
+// Step 1: Request OTP — only works for admin accounts with an email set
+app.post("/api/forgot-password", async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username)
+      return res.status(400).json({ error: "Username is required" });
+
+    const user = await User.findOne({ username: username.toLowerCase() });
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (user.role !== "admin") {
+      return res
+        .status(403)
+        .json({
+          error:
+            "Password reset via OTP is only available for admin accounts. Contact your admin to reset your password.",
+        });
+    }
+    if (!user.email) {
+      return res
+        .status(400)
+        .json({
+          error:
+            "No email address on file for this account. Contact your administrator.",
+        });
+    }
+    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+      return res
+        .status(500)
+        .json({
+          error:
+            "Email service not configured on server. Set GMAIL_USER and GMAIL_APP_PASSWORD in environment.",
+        });
+    }
+
+    // Generate 6-digit OTP, valid 10 minutes
+    const otp = crypto.randomInt(100000, 999999).toString();
+    otpStore.set(username.toLowerCase(), {
+      otp,
+      expiry: Date.now() + 10 * 60 * 1000,
+    });
+
+    const transporter = createTransporter();
+    await transporter.sendMail({
+      from: `"HAMA Sales App" <${process.env.GMAIL_USER}>`,
+      to: user.email,
+      subject: "Your Password Reset OTP",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; border: 1px solid #e0e0e0; border-radius: 8px;">
+          <h2 style="color: #cc0000; margin-bottom: 8px;">HAMA Sales Tracker</h2>
+          <p style="color: #333; font-size: 15px;">You requested a password reset for the admin account <strong>${username}</strong>.</p>
+          <div style="background: #f5f5f5; border-radius: 6px; padding: 24px; text-align: center; margin: 24px 0;">
+            <p style="margin: 0 0 8px; color: #666; font-size: 13px;">Your one-time password (OTP)</p>
+            <p style="margin: 0; font-size: 40px; font-weight: bold; letter-spacing: 8px; color: #cc0000;">${otp}</p>
+          </div>
+          <p style="color: #666; font-size: 13px;">This OTP expires in <strong>10 minutes</strong>. If you did not request this, please ignore this email.</p>
+        </div>
+      `,
+    });
+
+    console.log("✅ OTP sent to", user.email, "for user", username);
+    // Return masked email so frontend can show "sent to g***@gmail.com"
+    const masked = user.email.replace(/(.{1}).+(@.+)/, "$1***$2");
+    res.json({ success: true, maskedEmail: masked });
+  } catch (err) {
+    console.error("❌ Forgot password error:", err.message);
+    res.status(500).json({ error: "Failed to send OTP: " + err.message });
+  }
+});
+
+// Step 2: Verify OTP
+app.post("/api/verify-otp", async (req, res) => {
+  try {
+    const { username, otp } = req.body;
+    if (!username || !otp)
+      return res.status(400).json({ error: "Username and OTP required" });
+
+    const stored = otpStore.get(username.toLowerCase());
+    if (!stored)
+      return res
+        .status(400)
+        .json({ error: "No OTP requested for this account" });
+    if (Date.now() > stored.expiry) {
+      otpStore.delete(username.toLowerCase());
+      return res
+        .status(400)
+        .json({ error: "OTP has expired. Please request a new one." });
+    }
+    if (stored.otp !== otp.trim()) {
+      return res
+        .status(400)
+        .json({ error: "Invalid OTP. Please check and try again." });
+    }
+
+    // OTP valid — mark as verified so reset step can proceed
+    otpStore.set(username.toLowerCase(), { ...stored, verified: true });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Verify OTP error:", err.message);
+    res.status(500).json({ error: "Failed to verify OTP" });
+  }
+});
+
+// Step 3: Reset password (only if OTP was verified)
+app.post("/api/reset-password-otp", async (req, res) => {
+  try {
+    const { username, newPassword } = req.body;
+    if (!username || !newPassword)
+      return res
+        .status(400)
+        .json({ error: "Username and new password required" });
+    if (newPassword.length < 6)
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 6 characters" });
+
+    const stored = otpStore.get(username.toLowerCase());
+    if (!stored || !stored.verified) {
+      return res
+        .status(403)
+        .json({
+          error: "OTP not verified. Please complete verification first.",
+        });
+    }
+
+    const user = await User.findOneAndUpdate(
+      { username: username.toLowerCase() },
+      { password: newPassword },
+      { new: true },
+    );
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    otpStore.delete(username.toLowerCase());
+    console.log("✅ Password reset via OTP for", username);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("❌ Reset password error:", err.message);
+    res.status(500).json({ error: "Failed to reset password" });
+  }
 });
 
 /* ===================== USERS ===================== */
