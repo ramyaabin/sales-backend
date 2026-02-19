@@ -23,13 +23,10 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 /* ===================== CORS ===================== */
+/* This allows both localhost and ANY deployed frontend */
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "https://salesapp-c1xw.onrender.com",
-      "https://salesapp-yqxl.onrender.com", // ADD THIS - Your actual frontend URL
-    ],
+    origin: true,
     credentials: true,
   }),
 );
@@ -38,7 +35,7 @@ app.use(express.json());
 
 /* ===================== REQUEST LOG ===================== */
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   next();
 });
 
@@ -83,7 +80,7 @@ app.post("/api/users", async (req, res) => {
     }
 
     if (await User.findOne({ username })) {
-      return res.status(400).json({ error: "Username exists" });
+      return res.status(400).json({ error: "Username already exists" });
     }
 
     const user = await User.create({
@@ -104,9 +101,11 @@ app.post("/api/users", async (req, res) => {
 app.delete("/api/users/:salesmanId", async (req, res) => {
   try {
     const { salesmanId } = req.params;
+
     await User.deleteOne({ salesmanId });
     await Sale.deleteMany({ salesmanId });
     await Leave.deleteMany({ salesmanId });
+
     res.json({ success: true });
   } catch (err) {
     console.error("❌ Error deleting user:", err.message);
@@ -118,6 +117,7 @@ app.delete("/api/users/:salesmanId", async (req, res) => {
 app.post("/api/login", async (req, res) => {
   try {
     const { username, password } = req.body;
+
     const user = await User.findOne({ username, password });
 
     if (!user) {
@@ -134,7 +134,8 @@ app.post("/api/login", async (req, res) => {
 /* ===================== PRODUCTS ===================== */
 app.get("/api/products", async (req, res) => {
   try {
-    res.json(await Product.find());
+    const products = await Product.find();
+    res.json(products);
   } catch (err) {
     console.error("❌ Error fetching products:", err.message);
     res.status(500).json({ error: "Failed to fetch products" });
@@ -156,11 +157,14 @@ app.get("/api/sales", async (req, res) => {
   try {
     const { salesmanId, date, month } = req.query;
     let query = {};
+
     if (salesmanId) query.salesmanId = salesmanId;
     if (date) query.date = date;
     if (month) query.date = { $regex: `^${month}` };
 
-    res.json(await Sale.find(query).sort({ date: -1 }));
+    const sales = await Sale.find(query).sort({ date: -1 });
+
+    res.json(sales);
   } catch (err) {
     console.error("❌ Error fetching sales:", err.message);
     res.status(500).json({ error: "Failed to fetch sales" });
@@ -169,13 +173,15 @@ app.get("/api/sales", async (req, res) => {
 
 app.post("/api/sales", async (req, res) => {
   try {
-    console.log("📥 Received sale data:", req.body);
+    console.log("📥 Sale received:", req.body);
+
     const sale = await Sale.create(req.body);
-    console.log("✅ Sale created successfully:", sale._id);
+
+    console.log("✅ Sale saved:", sale._id);
+
     res.json({ success: true, sale });
   } catch (err) {
     console.error("❌ Error adding sale:", err.message);
-    console.error("Full error details:", err);
     res.status(500).json({ error: "Failed to add sale" });
   }
 });
@@ -185,10 +191,13 @@ app.get("/api/leaves", async (req, res) => {
   try {
     const { salesmanId, date } = req.query;
     let query = {};
+
     if (salesmanId) query.salesmanId = salesmanId;
     if (date) query.date = date;
 
-    res.json(await Leave.find(query).sort({ date: -1 }));
+    const leaves = await Leave.find(query).sort({ date: -1 });
+
+    res.json(leaves);
   } catch (err) {
     console.error("❌ Error fetching leaves:", err.message);
     res.status(500).json({ error: "Failed to fetch leaves" });
@@ -197,23 +206,24 @@ app.get("/api/leaves", async (req, res) => {
 
 app.post("/api/leaves", async (req, res) => {
   try {
-    console.log("📥 Received leave data:", req.body);
+    console.log("📥 Leave received:", req.body);
 
-    if (
-      await Leave.findOne({
-        salesmanId: req.body.salesmanId,
-        date: req.body.date,
-      })
-    ) {
+    const exists = await Leave.findOne({
+      salesmanId: req.body.salesmanId,
+      date: req.body.date,
+    });
+
+    if (exists) {
       return res.status(400).json({ error: "Leave already applied" });
     }
 
     const leave = await Leave.create(req.body);
-    console.log("✅ Leave created successfully:", leave._id);
+
+    console.log("✅ Leave saved:", leave._id);
+
     res.json({ success: true, leave });
   } catch (err) {
     console.error("❌ Error adding leave:", err.message);
-    console.error("Full error details:", err);
     res.status(500).json({ error: "Failed to add leave" });
   }
 });
@@ -222,10 +232,12 @@ app.post("/api/leaves", async (req, res) => {
 app.get("/api/stats", async (req, res) => {
   try {
     const sales = await Sale.find();
+
     const totalAmount = sales.reduce(
       (sum, s) => sum + (s.totalAmount || s.quantity * s.price),
       0,
     );
+
     const totalSalesmen = await User.countDocuments({ role: "salesman" });
 
     res.json({
@@ -244,13 +256,15 @@ app.use((req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
 
-/* ===================== CONNECT DB & START SERVER ===================== */
+/* ===================== CONNECT DB ===================== */
 mongoose
   .connect(process.env.MONGO_URI)
   .then(async () => {
     console.log("✅ MongoDB connected");
 
-    if (!(await User.findOne({ username: "gokul" }))) {
+    const adminExists = await User.findOne({ username: "gokul" });
+
+    if (!adminExists) {
       await User.create({
         username: "gokul",
         password: "admin123",
@@ -258,6 +272,7 @@ mongoose
         role: "admin",
         email: "admin@gmail.com",
       });
+
       console.log("✅ Default admin created");
     }
 
