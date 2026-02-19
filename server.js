@@ -238,11 +238,44 @@ app.get("/api/sales", async (req, res) => {
 
 app.post("/api/sales", async (req, res) => {
   try {
-    const sale = await Sale.create(req.body);
-    // ✅ Return consistent shape — sale is always in result.sale
+    const {
+      salesmanId,
+      salesmanName,
+      date,
+      brand,
+      itemCode,
+      quantity,
+      price,
+      totalAmount,
+    } = req.body;
+
+    if (!salesmanId)
+      return res.status(400).json({ error: "salesmanId is required" });
+    if (!salesmanName)
+      return res.status(400).json({ error: "salesmanName is required" });
+    if (!date) return res.status(400).json({ error: "date is required" });
+    if (!brand) return res.status(400).json({ error: "brand is required" });
+    if (!itemCode)
+      return res.status(400).json({ error: "itemCode is required" });
+    if (!quantity)
+      return res.status(400).json({ error: "quantity is required" });
+    if (!price) return res.status(400).json({ error: "price is required" });
+
+    const sale = await Sale.create({
+      salesmanId,
+      salesmanName,
+      date,
+      brand,
+      itemCode: String(itemCode),
+      quantity: Number(quantity),
+      price: Number(price),
+      totalAmount: Number(totalAmount || quantity * price),
+    });
+
     res.status(201).json({ success: true, sale });
-  } catch {
-    res.status(500).json({ error: "Failed to add sale" });
+  } catch (err) {
+    console.error("❌ Failed to add sale:", err.message, err);
+    res.status(500).json({ error: err.message || "Failed to add sale" });
   }
 });
 
@@ -273,19 +306,43 @@ app.get("/api/leaves", async (req, res) => {
 
 app.post("/api/leaves", async (req, res) => {
   try {
-    if (
-      await Leave.findOne({
-        salesmanId: req.body.salesmanId,
-        date: req.body.date,
-      })
-    ) {
-      return res.status(400).json({ error: "Leave already applied" });
+    const { salesmanId, salesmanName, date, reason } = req.body;
+
+    // ✅ Validate required fields explicitly with clear error messages
+    if (!salesmanId)
+      return res
+        .status(400)
+        .json({
+          error:
+            "salesmanId is required. The logged-in user may not have a salesmanId assigned.",
+        });
+    if (!salesmanName)
+      return res.status(400).json({ error: "salesmanName is required" });
+    if (!date) return res.status(400).json({ error: "date is required" });
+    if (!reason) return res.status(400).json({ error: "reason is required" });
+
+    // Check for duplicate
+    const existing = await Leave.findOne({ salesmanId, date });
+    if (existing) {
+      return res
+        .status(400)
+        .json({ error: "Leave already applied for this date" });
     }
 
-    const leave = await Leave.create(req.body);
+    // ✅ Build leave explicitly (ignore frontend timestamp — let schema default handle it)
+    const leave = await Leave.create({
+      salesmanId,
+      salesmanName,
+      date,
+      reason,
+      status: "Pending",
+    });
+
     res.status(201).json({ success: true, leave });
-  } catch {
-    res.status(500).json({ error: "Failed to add leave" });
+  } catch (err) {
+    // ✅ Log and return the real error so it's visible in Render logs + browser
+    console.error("❌ Failed to add leave:", err.message, err);
+    res.status(500).json({ error: err.message || "Failed to add leave" });
   }
 });
 
