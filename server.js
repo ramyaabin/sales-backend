@@ -85,26 +85,21 @@ app.get("/api/test", (req, res) => {
 // Step 1: Request OTP — only works for admin accounts with an email set
 app.post("/api/forgot-password", async (req, res) => {
   try {
-    const { username } = req.body;
-    if (!username)
-      return res.status(400).json({ error: "Username is required" });
+    const { email } = req.body;
+    if (!email)
+      return res.status(400).json({ error: "Email address is required" });
 
-    const user = await User.findOne({ username: username.toLowerCase() });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user)
+      return res
+        .status(404)
+        .json({ error: "No account found with that email address" });
     if (user.role !== "admin") {
       return res
         .status(403)
         .json({
           error:
             "Password reset via OTP is only available for admin accounts. Contact your admin to reset your password.",
-        });
-    }
-    if (!user.email) {
-      return res
-        .status(400)
-        .json({
-          error:
-            "No email address on file for this account. Contact your administrator.",
         });
     }
     if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
@@ -116,34 +111,36 @@ app.post("/api/forgot-password", async (req, res) => {
         });
     }
 
-    // Generate 6-digit OTP, valid 10 minutes
+    // Generate 6-digit OTP, valid 5 minutes
     const otp = crypto.randomInt(100000, 999999).toString();
-    otpStore.set(username.toLowerCase(), {
+    const emailKey = email.toLowerCase().trim();
+    otpStore.set(emailKey, {
       otp,
-      expiry: Date.now() + 10 * 60 * 1000,
+      expiry: Date.now() + 5 * 60 * 1000,
+      username: user.username,
     });
 
     const transporter = createTransporter();
     await transporter.sendMail({
       from: `"HAMA Sales App" <${process.env.GMAIL_USER}>`,
       to: user.email,
-      subject: "Your Password Reset OTP",
+      subject: "Your Password Reset OTP – HAMA Sales Tracker",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; border: 1px solid #e0e0e0; border-radius: 8px;">
           <h2 style="color: #cc0000; margin-bottom: 8px;">HAMA Sales Tracker</h2>
-          <p style="color: #333; font-size: 15px;">You requested a password reset for the admin account <strong>${username}</strong>.</p>
+          <p style="color: #333; font-size: 15px;">A password reset was requested for the admin account associated with <strong>${user.email}</strong>.</p>
           <div style="background: #f5f5f5; border-radius: 6px; padding: 24px; text-align: center; margin: 24px 0;">
             <p style="margin: 0 0 8px; color: #666; font-size: 13px;">Your one-time password (OTP)</p>
             <p style="margin: 0; font-size: 40px; font-weight: bold; letter-spacing: 8px; color: #cc0000;">${otp}</p>
           </div>
-          <p style="color: #666; font-size: 13px;">This OTP expires in <strong>10 minutes</strong>. If you did not request this, please ignore this email.</p>
+          <p style="color: #666; font-size: 13px;">This OTP expires in <strong>5 minutes</strong>. If you did not request this, please ignore this email.</p>
         </div>
       `,
     });
 
-    console.log("✅ OTP sent to", user.email, "for user", username);
+    console.log("✅ OTP sent to", user.email);
     // Return masked email so frontend can show "sent to g***@gmail.com"
-    const masked = user.email.replace(/(.{1}).+(@.+)/, "$1***$2");
+    const masked = user.email.replace(/(.{1,2})[^@]*(@.+)/, "$1***$2");
     res.json({ success: true, maskedEmail: masked });
   } catch (err) {
     console.error("❌ Forgot password error:", err.message);
@@ -154,17 +151,16 @@ app.post("/api/forgot-password", async (req, res) => {
 // Step 2: Verify OTP
 app.post("/api/verify-otp", async (req, res) => {
   try {
-    const { username, otp } = req.body;
-    if (!username || !otp)
-      return res.status(400).json({ error: "Username and OTP required" });
+    const { email, otp } = req.body;
+    if (!email || !otp)
+      return res.status(400).json({ error: "Email and OTP required" });
 
-    const stored = otpStore.get(username.toLowerCase());
+    const emailKey = email.toLowerCase().trim();
+    const stored = otpStore.get(emailKey);
     if (!stored)
-      return res
-        .status(400)
-        .json({ error: "No OTP requested for this account" });
+      return res.status(400).json({ error: "No OTP requested for this email" });
     if (Date.now() > stored.expiry) {
-      otpStore.delete(username.toLowerCase());
+      otpStore.delete(emailKey);
       return res
         .status(400)
         .json({ error: "OTP has expired. Please request a new one." });
@@ -176,7 +172,7 @@ app.post("/api/verify-otp", async (req, res) => {
     }
 
     // OTP valid — mark as verified so reset step can proceed
-    otpStore.set(username.toLowerCase(), { ...stored, verified: true });
+    otpStore.set(emailKey, { ...stored, verified: true });
     res.json({ success: true });
   } catch (err) {
     console.error("❌ Verify OTP error:", err.message);
@@ -187,17 +183,16 @@ app.post("/api/verify-otp", async (req, res) => {
 // Step 3: Reset password (only if OTP was verified)
 app.post("/api/reset-password-otp", async (req, res) => {
   try {
-    const { username, newPassword } = req.body;
-    if (!username || !newPassword)
-      return res
-        .status(400)
-        .json({ error: "Username and new password required" });
+    const { email, newPassword } = req.body;
+    if (!email || !newPassword)
+      return res.status(400).json({ error: "Email and new password required" });
     if (newPassword.length < 6)
       return res
         .status(400)
         .json({ error: "Password must be at least 6 characters" });
 
-    const stored = otpStore.get(username.toLowerCase());
+    const emailKey = email.toLowerCase().trim();
+    const stored = otpStore.get(emailKey);
     if (!stored || !stored.verified) {
       return res
         .status(403)
@@ -206,15 +201,16 @@ app.post("/api/reset-password-otp", async (req, res) => {
         });
     }
 
+    // Use the username saved in the OTP record to update the correct account
     const user = await User.findOneAndUpdate(
-      { username: username.toLowerCase() },
+      { username: stored.username },
       { password: newPassword },
       { new: true },
     );
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    otpStore.delete(username.toLowerCase());
-    console.log("✅ Password reset via OTP for", username);
+    otpStore.delete(emailKey);
+    console.log("✅ Password reset via OTP for admin:", stored.username);
     res.json({ success: true });
   } catch (err) {
     console.error("❌ Reset password error:", err.message);
