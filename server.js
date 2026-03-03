@@ -311,48 +311,66 @@ app.get("/api/products", async (req, res) => {
   try {
     const { search, brand, category } = req.query;
 
-    // Build query — don't filter by isActive so legacy data without it still appears
     let query = {};
 
     if (search) {
       const regex = new RegExp(search, "i");
+      // ✅ Use $or with regex only — avoid $text index which may be stale/missing
       query.$or = [
         { brand: regex },
         { Brand: regex },
         { description: regex },
-        { itemCode: regex },
-        { "Item Code": regex },
+        { Description: regex },
         { modelNumber: regex },
+        { ModelNo: regex },
+        { itemCode: regex },
       ];
     }
 
-    if (brand)
+    if (brand) {
       query.$or = [
         { brand: new RegExp(brand, "i") },
         { Brand: new RegExp(brand, "i") },
       ];
+    }
+
     if (category) query.category = category;
 
-    const raw = await Product.find(query).sort({ brand: 1 }).lean();
+    const raw = await Product.find(query).sort({ Brand: 1, brand: 1 }).lean();
 
-    // ✅ Normalize every product so the frontend always gets consistent fields
-    // regardless of how/when data was originally uploaded.
-    // Field names below reflect what is ACTUALLY stored in MongoDB documents.
+    console.log(`📦 GET /api/products — found ${raw.length} documents`);
+    if (raw.length > 0) {
+      console.log("📦 Sample raw doc keys:", Object.keys(raw[0]));
+    }
+
+    // ✅ Normalize every product so the frontend always gets consistent fields.
+    // Resolves field names from your actual Excel columns:
+    //   Brand | ModelNo. | Barcode | Description | RSP+VAT
     const products = raw.map((p) => ({
       ...p,
-      // itemCode — stored as "Item Code", "itemCode", "ItemCode", etc.
-      itemCode: String(
-        p.itemCode ||
-          p["Item Code"] ||
-          p.itemcode ||
-          p.ItemCode ||
-          p["item code"] ||
-          p["ITEM CODE"] ||
+      // brand
+      brand: String(p.brand || p.Brand || "").trim(),
+      // modelNumber — your Excel column is "ModelNo."
+      modelNumber: String(
+        p.modelNumber ||
+          p.ModelNo ||
+          p["ModelNo."] ||
+          p["Model "] ||
+          p.Model ||
+          p.modelNo ||
           "",
       ).trim(),
-      // brand — stored as "brand" or "Brand"
-      brand: String(p.brand || p.Brand || "").trim(),
-      // price — stored as "RSP+VAT", " RSP+Vat ", "RSP+Vat", "price", "rspVat"
+      // itemCode — your Excel has no Item Code column, so this may be empty
+      itemCode: String(
+        p.itemCode || p["Item Code"] || p.itemcode || p.ItemCode || "",
+      ).trim(),
+      // ean/barcode — your Excel column is "Barcode"
+      ean: String(p.ean || p.EAN || p.Barcode || p.barcode || "").trim(),
+      // description — your Excel column is "Description"
+      description: String(
+        p.description || p.Description || p["Item Description"] || "",
+      ).trim(),
+      // price — your Excel column is "RSP+VAT"
       price:
         (p["RSP+VAT"] > 0 ? p["RSP+VAT"] : null) ||
         (p["RSP+Vat"] > 0 ? p["RSP+Vat"] : null) ||
@@ -369,42 +387,13 @@ app.get("/api/products", async (req, res) => {
         (p.rspVat > 0 ? p.rspVat : null) ||
         (p.price > 0 ? p.price : null) ||
         0,
-      // description — stored as "Description" or "description" or "Item Description"
-      description: String(
-        p.description ||
-          p.Description ||
-          p["Item Description"] ||
-          p["item description"] ||
-          "",
-      ).trim(),
-      // modelNumber — stored as "ModelNo", "Model", "Model ", "modelNumber", etc.
-      modelNumber: String(
-        p.modelNumber ||
-          p.ModelNo ||
-          p["ModelNo."] ||
-          p["Model "] ||
-          p.Model ||
-          p.modelNo ||
-          p["Model No"] ||
-          p["Model No."] ||
-          "",
-      ).trim(),
-      // ean/barcode — stored as "Barcode", "EAN", "ean", etc.
-      ean: String(
-        p.ean ||
-          p.EAN ||
-          p.Barcode ||
-          p.barcode ||
-          p["EAN Code"] ||
-          p["Bar Code"] ||
-          "",
-      ).trim(),
     }));
 
     res.json(products);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Failed to fetch products" });
+    // ✅ Log the REAL error so it appears in Render logs
+    console.error("❌ GET /api/products error:", err.message, err.stack);
+    res.status(500).json({ error: "Failed to fetch products: " + err.message });
   }
 });
 
@@ -454,8 +443,6 @@ app.post("/api/sales", async (req, res) => {
       return res.status(400).json({ error: "salesmanName is required" });
     if (!date) return res.status(400).json({ error: "date is required" });
     if (!brand) return res.status(400).json({ error: "brand is required" });
-    if (!itemCode)
-      return res.status(400).json({ error: "itemCode is required" });
     if (!quantity)
       return res.status(400).json({ error: "quantity is required" });
     if (!price) return res.status(400).json({ error: "price is required" });
@@ -615,6 +602,26 @@ mongoose
       // Index may not exist on fresh deployments — that is fine
       if (e.code !== 27)
         console.warn("⚠️ Could not drop stale index:", e.message);
+    }
+
+    // ✅ Drop stale itemCode index — old schema stored it as Number, new schema
+    // stores it as String. The type mismatch causes query errors on the products
+    // collection. Mongoose will recreate the correct String index automatically.
+    try {
+      await Product.collection.dropIndex("itemCode_1");
+      console.log("✅ Dropped stale products index: itemCode_1");
+    } catch (e) {
+      if (e.code !== 27)
+        console.warn("⚠️ Could not drop stale product index:", e.message);
+    }
+
+    // ✅ Also drop the compound brand+itemCode index for the same reason
+    try {
+      await Product.collection.dropIndex("brand_1_itemCode_1");
+      console.log("✅ Dropped stale products index: brand_1_itemCode_1");
+    } catch (e) {
+      if (e.code !== 27)
+        console.warn("⚠️ Could not drop stale product index:", e.message);
     }
 
     if (!(await User.findOne({ username: "admin" }))) {
