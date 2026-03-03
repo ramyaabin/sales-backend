@@ -95,20 +95,16 @@ app.post("/api/forgot-password", async (req, res) => {
         .status(404)
         .json({ error: "No account found with that email address" });
     if (user.role !== "admin") {
-      return res
-        .status(403)
-        .json({
-          error:
-            "Password reset via OTP is only available for admin accounts. Contact your admin to reset your password.",
-        });
+      return res.status(403).json({
+        error:
+          "Password reset via OTP is only available for admin accounts. Contact your admin to reset your password.",
+      });
     }
     if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-      return res
-        .status(500)
-        .json({
-          error:
-            "Email service not configured on server. Set GMAIL_USER and GMAIL_APP_PASSWORD in environment.",
-        });
+      return res.status(500).json({
+        error:
+          "Email service not configured on server. Set GMAIL_USER and GMAIL_APP_PASSWORD in environment.",
+      });
     }
 
     // Generate 6-digit OTP, valid 5 minutes
@@ -194,11 +190,9 @@ app.post("/api/reset-password-otp", async (req, res) => {
     const emailKey = email.toLowerCase().trim();
     const stored = otpStore.get(emailKey);
     if (!stored || !stored.verified) {
-      return res
-        .status(403)
-        .json({
-          error: "OTP not verified. Please complete verification first.",
-        });
+      return res.status(403).json({
+        error: "OTP not verified. Please complete verification first.",
+      });
     }
 
     // Use the username saved in the OTP record to update the correct account
@@ -296,7 +290,11 @@ app.delete("/api/users/:salesmanId", async (req, res) => {
 app.post("/api/login", async (req, res) => {
   try {
     const { username, password } = req.body;
-    const user = await User.findOne({ username, password });
+    // Normalize username to lowercase (schema stores lowercase) + use lean() for faster query
+    const user = await User.findOne({
+      username: username?.toLowerCase().trim(),
+      password,
+    }).lean();
 
     if (!user) {
       return res.status(401).json({ error: "Invalid credentials" });
@@ -395,8 +393,11 @@ app.post("/api/sales", async (req, res) => {
       salesmanId,
       salesmanName,
       date,
+      location,
       brand,
       itemCode,
+      barcode,
+      description,
       quantity,
       price,
       totalAmount,
@@ -418,8 +419,11 @@ app.post("/api/sales", async (req, res) => {
       salesmanId,
       salesmanName,
       date,
+      location: location || "",
       brand,
       itemCode: String(itemCode),
+      barcode: barcode || "",
+      description: description || "",
       quantity: Number(quantity),
       price: Number(price),
       totalAmount: Number(totalAmount || quantity * price),
@@ -463,12 +467,10 @@ app.post("/api/leaves", async (req, res) => {
 
     // ✅ Validate required fields explicitly with clear error messages
     if (!salesmanId)
-      return res
-        .status(400)
-        .json({
-          error:
-            "salesmanId is required. The logged-in user may not have a salesmanId assigned.",
-        });
+      return res.status(400).json({
+        error:
+          "salesmanId is required. The logged-in user may not have a salesmanId assigned.",
+      });
     if (!salesmanName)
       return res.status(400).json({ error: "salesmanName is required" });
     if (!date) return res.status(400).json({ error: "date is required" });
@@ -570,11 +572,11 @@ mongoose
         console.warn("⚠️ Could not drop stale index:", e.message);
     }
 
-    if (!(await User.findOne({ username: "gokul" }))) {
+    if (!(await User.findOne({ username: "admin" }))) {
       await User.create({
-        username: "gokul",
+        username: "Admin",
         password: "admin123",
-        name: "Gokul",
+        name: "Admin",
         role: "admin",
         email: "admin@gmail.com",
       });
