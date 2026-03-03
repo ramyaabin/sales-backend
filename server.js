@@ -336,23 +336,68 @@ app.get("/api/products", async (req, res) => {
     const raw = await Product.find(query).sort({ brand: 1 }).lean();
 
     // ✅ Normalize every product so the frontend always gets consistent fields
-    // regardless of how/when data was originally uploaded
+    // regardless of how/when data was originally uploaded.
+    // Field names below reflect what is ACTUALLY stored in MongoDB documents.
     const products = raw.map((p) => ({
       ...p,
-      // itemCode — always a string so .toLowerCase() never crashes
+      // itemCode — stored as "Item Code", "itemCode", "ItemCode", etc.
       itemCode: String(
-        p.itemCode || p["Item Code"] || p.itemcode || p.ItemCode || "",
-      ),
-      // brand — prefer lowercase field, fall back to capitalized
-      brand: p.brand || p.Brand || "",
-      // price — frontend reads p.price; map from rspVat if price missing
-      price: p.price ?? p.rspVat ?? p[" RSP+Vat "] ?? p["RSP+Vat"] ?? 0,
-      // description
-      description:
-        p.description || p.Description || p["Item Description"] || "",
-      // modelNumber
+        p.itemCode ||
+          p["Item Code"] ||
+          p.itemcode ||
+          p.ItemCode ||
+          p["item code"] ||
+          p["ITEM CODE"] ||
+          "",
+      ).trim(),
+      // brand — stored as "brand" or "Brand"
+      brand: String(p.brand || p.Brand || "").trim(),
+      // price — stored as "RSP+VAT", " RSP+Vat ", "RSP+Vat", "price", "rspVat"
+      price:
+        (p["RSP+VAT"] > 0 ? p["RSP+VAT"] : null) ||
+        (p["RSP+Vat"] > 0 ? p["RSP+Vat"] : null) ||
+        (p[" RSP+Vat "] > 0 ? p[" RSP+Vat "] : null) ||
+        (p["RSP + VAT"] > 0 ? p["RSP + VAT"] : null) ||
+        (p.rspVat > 0 ? p.rspVat : null) ||
+        (p.price > 0 ? p.price : null) ||
+        (p.Price > 0 ? p.Price : null) ||
+        0,
+      rspVat:
+        (p["RSP+VAT"] > 0 ? p["RSP+VAT"] : null) ||
+        (p["RSP+Vat"] > 0 ? p["RSP+Vat"] : null) ||
+        (p[" RSP+Vat "] > 0 ? p[" RSP+Vat "] : null) ||
+        (p.rspVat > 0 ? p.rspVat : null) ||
+        (p.price > 0 ? p.price : null) ||
+        0,
+      // description — stored as "Description" or "description" or "Item Description"
+      description: String(
+        p.description ||
+          p.Description ||
+          p["Item Description"] ||
+          p["item description"] ||
+          "",
+      ).trim(),
+      // modelNumber — stored as "ModelNo", "Model", "Model ", "modelNumber", etc.
       modelNumber: String(
-        p.modelNumber || p["Model "] || p.Model || p.modelNo || "",
+        p.modelNumber ||
+          p.ModelNo ||
+          p["ModelNo."] ||
+          p["Model "] ||
+          p.Model ||
+          p.modelNo ||
+          p["Model No"] ||
+          p["Model No."] ||
+          "",
+      ).trim(),
+      // ean/barcode — stored as "Barcode", "EAN", "ean", etc.
+      ean: String(
+        p.ean ||
+          p.EAN ||
+          p.Barcode ||
+          p.barcode ||
+          p["EAN Code"] ||
+          p["Bar Code"] ||
+          "",
       ).trim(),
     }));
 
