@@ -156,7 +156,8 @@ router.post("/upload-excel", upload.single("file"), async (req, res) => {
 
         return {
           brand: String(rawBrand || sheetName).trim(),
-          itemCode: rawItemCode !== undefined ? String(rawItemCode).trim() : "",
+          itemCode:
+            rawItemCode !== undefined ? String(rawItemCode).trim() : null,
           modelNumber: rawModel !== undefined ? String(rawModel).trim() : "",
           ean: rawEan !== undefined ? String(rawEan).trim() : "",
           description: rawDesc !== undefined ? String(rawDesc).trim() : "",

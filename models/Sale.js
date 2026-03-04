@@ -7,7 +7,7 @@ const SaleSchema = new mongoose.Schema({
   date: { type: String, required: true }, // store as YYYY-MM-DD
   location: { type: String, default: "" }, // Location / Outlet Name
   brand: { type: String, required: true },
-  itemCode: { type: String, required: true },
+  itemCode: { type: String, default: "" },
   barcode: { type: String, default: "" }, // EAN / Barcode (auto-filled)
   description: { type: String, default: "" }, // Item Description (auto-filled)
   quantity: { type: Number, required: true },
