@@ -350,43 +350,61 @@ app.get("/api/products", async (req, res) => {
       ...p,
       // brand
       brand: String(p.brand || p.Brand || "").trim(),
-      // modelNumber — your Excel column is "ModelNo."
-      modelNumber: String(
-        p.modelNumber ||
-          p.ModelNo ||
-          p["ModelNo."] ||
-          p["Model "] ||
-          p.Model ||
-          p.modelNo ||
-          "",
-      ).trim(),
-      // itemCode — your Excel has no Item Code column, so this may be empty
+      // modelNumber — "ModelNo." stored by MongoDB as { "": value } due to dot in key name
+      modelNumber: (() => {
+        const raw = p.modelNumber || p.modelNo || p["Model "] || p.Model;
+        if (raw) return String(raw).trim();
+        const mn = p.ModelNo || p["ModelNo."];
+        if (mn && typeof mn === "object") {
+          const v = Object.values(mn)[0];
+          return v !== undefined ? String(v).trim() : "";
+        }
+        return mn ? String(mn).trim() : "";
+      })(),
+      // itemCode — Excel has no Item Code column, may be empty
       itemCode: String(
         p.itemCode || p["Item Code"] || p.itemcode || p.ItemCode || "",
       ).trim(),
-      // ean/barcode — your Excel column is "Barcode"
+      // ean/barcode — Excel column is "Barcode"
       ean: String(p.ean || p.EAN || p.Barcode || p.barcode || "").trim(),
-      // description — your Excel column is "Description"
+      // description — Excel column is "Description"
       description: String(
         p.description || p.Description || p["Item Description"] || "",
       ).trim(),
-      // price — your Excel column is "RSP+VAT"
-      price:
-        (p["RSP+VAT"] > 0 ? p["RSP+VAT"] : null) ||
-        (p["RSP+Vat"] > 0 ? p["RSP+Vat"] : null) ||
-        (p[" RSP+Vat "] > 0 ? p[" RSP+Vat "] : null) ||
-        (p["RSP + VAT"] > 0 ? p["RSP + VAT"] : null) ||
-        (p.rspVat > 0 ? p.rspVat : null) ||
-        (p.price > 0 ? p.price : null) ||
-        (p.Price > 0 ? p.Price : null) ||
-        0,
-      rspVat:
-        (p["RSP+VAT"] > 0 ? p["RSP+VAT"] : null) ||
-        (p["RSP+Vat"] > 0 ? p["RSP+Vat"] : null) ||
-        (p[" RSP+Vat "] > 0 ? p[" RSP+Vat "] : null) ||
-        (p.rspVat > 0 ? p.rspVat : null) ||
-        (p.price > 0 ? p.price : null) ||
-        0,
+      // price — Excel stores as " RSP+VAT " (may have surrounding spaces)
+      // Loop over actual keys with .trim() so spaces don't break the match
+      price: (() => {
+        for (const key of Object.keys(p)) {
+          if (["RSP+VAT", "RSP+Vat", "RSP+VAT"].includes(key.trim())) {
+            if (Number(p[key]) > 0) return Number(p[key]);
+          }
+        }
+        return (
+          (p["RSP+VAT"] > 0 ? p["RSP+VAT"] : null) ||
+          (p["RSP+Vat"] > 0 ? p["RSP+Vat"] : null) ||
+          (p[" RSP+Vat "] > 0 ? p[" RSP+Vat "] : null) ||
+          (p["RSP + VAT"] > 0 ? p["RSP + VAT"] : null) ||
+          (p.rspVat > 0 ? p.rspVat : null) ||
+          (p.price > 0 ? p.price : null) ||
+          (p.Price > 0 ? p.Price : null) ||
+          0
+        );
+      })(),
+      rspVat: (() => {
+        for (const key of Object.keys(p)) {
+          if (["RSP+VAT", "RSP+Vat"].includes(key.trim())) {
+            if (Number(p[key]) > 0) return Number(p[key]);
+          }
+        }
+        return (
+          (p["RSP+VAT"] > 0 ? p["RSP+VAT"] : null) ||
+          (p["RSP+Vat"] > 0 ? p["RSP+Vat"] : null) ||
+          (p[" RSP+Vat "] > 0 ? p[" RSP+Vat "] : null) ||
+          (p.rspVat > 0 ? p.rspVat : null) ||
+          (p.price > 0 ? p.price : null) ||
+          0
+        );
+      })(),
     }));
 
     res.json(products);
